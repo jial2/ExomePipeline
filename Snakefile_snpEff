@@ -1,0 +1,55 @@
+import config
+import glob
+import os
+import sys, traceback
+from collections import defaultdict
+import hashlib
+
+#############################################
+#This snakemake is to annotate the vcf file using SnpEff
+#Created date: May 12 2015
+#Author: Li jia
+#Email: jial2@mail.nih.gov
+############################################
+
+THREADS=32
+
+
+samples=[os.path.basename(file).split('.')[0] for file in glob.glob('*.vcf')]
+mode="SNP INDEL".split()
+
+def print_exception(ex, rowmap):
+        for file, lineno, _, _ in traceback.extract_tb(ex.__traceback__):
+                        if file == "<string>":
+                                print("Error in line {} of Snakefile:\n{}".format(rowmap[lineno], str(ex)), file = sys.stderr)
+                                return
+        if not isinstance(ex, RuleException):
+                traceback.print_tb(ex.__traceback__)
+        print(ex, file=sys.stderr)
+
+
+rule all:
+	params: batch='-l nodes=1:gpfs -q ccr'
+	input: expand("all.{type}.dbnsfp.vcf", type=mode)
+
+rule dbnsfp:
+	input: vcf = 'all.{mode}.filter.vcf'
+	output: dbnsfp='all.{mode}.dbnsfp.vcf'
+	params: batch="-l nodes=1:gpfs -q ccr", genome=config.GENOME, snpsift=config.SNPSIFT, effconfig=config.SNPEFF_CONFIG,selectDB=config.SELECTDB, db29=config.DB29
+	shell: 'module load snpEff; {params.snpsift} dbnsfp -f {params.selectDB} -v -db {params.db29} {input.vcf} > {output.dbnsfp}'
+
+rule snpeff:
+	input: vcf='all.{mode}.vcf'
+        output: snpeff = 'all.{mode}.snpeff.vcf', html='stats_summary.{mode}.html', first ='all.{mode}.first.vcf', filter = 'all.{mode}.filter.vcf'
+        params: batch="-l nodes=1:gpfs -q ccr", snpeff=config.SNPEFF, genome=config.GENOME, snpsift=config.SNPSIFT, effconfig=config.SNPEFF_CONFIG, firstanno=config.FIRSTANNO, filtersift=config.FILTERSIFT
+#	threads: THREADS
+        shell:  """
+		module load snpEff; 
+		{params.snpeff} -v {params.genome} -c {params.effconfig} {input.vcf} -stats {output.html} > {output.snpeff}; 
+		cat {output.snpeff} | python {params.firstanno}> {output.first}; 
+		cat {output.first} | {params.snpsift} filter "{params.filtersift}" > {output.filter}
+		"""
+
+
+
+
